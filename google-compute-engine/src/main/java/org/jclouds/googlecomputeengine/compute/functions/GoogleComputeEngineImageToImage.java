@@ -42,7 +42,7 @@ public class GoogleComputeEngineImageToImage implements Function<Image, org.jclo
    @Override
    public org.jclouds.compute.domain.Image apply(Image image) {
       ImageBuilder builder = new ImageBuilder()
-              .id(image.getName())
+              .id(image.getSelfLink().toString())
               .name(image.getName())
               .providerId(image.getId())
               .description(image.getDescription().orNull())

@@ -49,7 +49,7 @@ public final class Image extends Resource {
                    String sourceType, RawDisk rawDisk, Deprecated deprecated) {
       super(Kind.IMAGE, id, creationTimestamp, selfLink, name, description);
       this.sourceType = checkNotNull(sourceType, "sourceType of %s", name);
-      this.rawDisk = checkNotNull(rawDisk, "rawDisk of %s", name);
+      this.rawDisk = rawDisk;
       this.deprecated = fromNullable(deprecated);
    }
 
