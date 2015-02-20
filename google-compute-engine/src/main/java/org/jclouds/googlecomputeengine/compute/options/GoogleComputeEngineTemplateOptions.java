@@ -62,6 +62,7 @@ public class GoogleComputeEngineTemplateOptions extends TemplateOptions {
          eTo.serviceAccounts(getServiceAccounts());
          eTo.enableNat(isEnableNat());
          eTo.disks(getDisks());
+         eTo.bootDiskSize(getBootDiskSize().orNull());
          eTo.keepBootDisk(shouldKeepBootDisk());
       }
    }

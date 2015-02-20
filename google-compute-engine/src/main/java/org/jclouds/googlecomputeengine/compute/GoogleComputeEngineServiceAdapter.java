@@ -235,7 +235,7 @@ public class GoogleComputeEngineServiceAdapter implements ComputeServiceAdapter<
 
       GoogleComputeEngineTemplateOptions options = GoogleComputeEngineTemplateOptions.class.cast(template.getOptions()).clone();
 
-      int diskSize = options.getBootDiskSize().or(10l).intValue();
+      int diskSize = options.getBootDiskSize().or(100l).intValue();
 
       String diskName = instanceName + "-" + GCE_BOOT_DISK_SUFFIX;
 
