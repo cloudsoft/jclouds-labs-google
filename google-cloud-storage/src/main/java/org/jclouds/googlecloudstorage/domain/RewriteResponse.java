@@ -14,28 +14,28 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.jclouds.oauth.v2.domain;
+package org.jclouds.googlecloudstorage.domain;
 
+import org.jclouds.javax.annotation.Nullable;
 import org.jclouds.json.SerializedNames;
 
 import com.google.auto.value.AutoValue;
 
-/**
- * The oauth token, obtained upon a successful token request and ready to embed in requests.
- */
 @AutoValue
-public abstract class Token {
-   /** The access token obtained from the OAuth server. */
-   public abstract String accessToken();
+public abstract class RewriteResponse {
+   // TODO(broudy): should these be UnsignedLong?
+   public abstract long totalBytesRewritten();
+   public abstract long objectSize();
+   public abstract boolean done();
+   @Nullable public abstract String rewriteToken();
+   public abstract GoogleCloudStorageObject resource();
 
-   /** The type of the token, e.g., {@code Bearer}. */
-   public abstract String tokenType();
+   @SerializedNames({"totalBytesRewritten", "objectSize", "done", "rewriteToken", "resource"})
+   public static RewriteResponse create(long totalBytesRewritten, long objectSize,
+         boolean done, String rewriteToken, GoogleCloudStorageObject resource) {
+      return new AutoValue_RewriteResponse(totalBytesRewritten, objectSize, done, rewriteToken, resource);
+   }
 
-   /** In how many seconds this token expires. */
-   public abstract long expiresIn();
-
-   @SerializedNames({"access_token", "token_type", "expires_in"})
-   public static Token create(String accessToken, String tokenType, long expiresIn) {
-      return new AutoValue_Token(accessToken, tokenType, expiresIn);
+   RewriteResponse() {
    }
 }

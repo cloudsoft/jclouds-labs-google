@@ -37,14 +37,18 @@ public abstract class AttachDisk {
       /** The {@link org.jclouds.googlecomputeengine.domain.Image#selfLink() source image}. */
       public abstract URI sourceImage();
 
-      @Nullable public abstract String diskType();
+      @Nullable public abstract URI diskType();
 
       static InitializeParams create(URI sourceImage) {
          return create(null, null, sourceImage, null);
       }
 
+      static InitializeParams create(URI sourceImage, URI diskType) {
+         return create(null, null, sourceImage, diskType);
+      }
+
       @SerializedNames({ "diskName", "diskSizeGb", "sourceImage", "diskType" })
-      public static InitializeParams create(String diskName, Long diskSizeGb, URI sourceImage, String diskType) {
+      public static InitializeParams create(String diskName, Long diskSizeGb, URI sourceImage, URI diskType) {
          return new AutoValue_AttachDisk_InitializeParams(diskName, diskSizeGb, sourceImage, diskType);
       }
 
@@ -101,6 +105,10 @@ public abstract class AttachDisk {
 
    public static AttachDisk newBootDisk(URI sourceImage) {
       return create(Type.PERSISTENT, null, InitializeParams.create(sourceImage), true, true);
+   }
+
+   public static AttachDisk newBootDisk(URI sourceImage, URI diskType) {
+      return create(Type.PERSISTENT, null, InitializeParams.create(sourceImage, diskType), true, true);
    }
 
    public static AttachDisk existingDisk(URI existingDisk) {

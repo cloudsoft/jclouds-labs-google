@@ -36,11 +36,13 @@ import org.jclouds.blobstore.domain.PageSet;
 import org.jclouds.blobstore.domain.StorageMetadata;
 import org.jclouds.blobstore.domain.internal.BlobImpl;
 import org.jclouds.blobstore.domain.internal.PageSetImpl;
+import org.jclouds.blobstore.functions.BlobToHttpGetOptions;
 import org.jclouds.blobstore.internal.BaseBlobStore;
 import org.jclouds.blobstore.options.CreateContainerOptions;
 import org.jclouds.blobstore.options.GetOptions;
 import org.jclouds.blobstore.options.ListContainerOptions;
 import org.jclouds.blobstore.options.PutOptions;
+import org.jclouds.blobstore.options.CopyOptions;
 import org.jclouds.blobstore.strategy.internal.FetchBlobMetadata;
 import org.jclouds.blobstore.util.BlobUtils;
 import org.jclouds.collect.Memoized;
@@ -64,6 +66,7 @@ import org.jclouds.googlecloudstorage.domain.templates.ObjectAccessControlsTempl
 import org.jclouds.googlecloudstorage.domain.templates.ObjectTemplate;
 import org.jclouds.googlecloudstorage.options.ListObjectOptions;
 import org.jclouds.http.HttpResponseException;
+import org.jclouds.io.ContentMetadata;
 import org.jclouds.io.Payload;
 
 import com.google.common.base.Charsets;
@@ -85,6 +88,7 @@ public final class GoogleCloudStorageBlobStore extends BaseBlobStore {
    private final BlobStoreListContainerOptionsToListObjectOptions listContainerOptionsToListObjectOptions;
    private final Provider<MultipartUploadStrategy> multipartUploadStrategy;
    private final Supplier<String> projectId;
+   private final BlobToHttpGetOptions blob2ObjectGetOptions;
 
    @Inject GoogleCloudStorageBlobStore(BlobStoreContext context, BlobUtils blobUtils, Supplier<Location> defaultLocation,
             @Memoized Supplier<Set<? extends Location>> locations, GoogleCloudStorageApi api,
@@ -93,7 +97,8 @@ public final class GoogleCloudStorageBlobStore extends BaseBlobStore {
             Provider<FetchBlobMetadata> fetchBlobMetadataProvider,
             BlobMetadataToObjectTemplate blobMetadataToObjectTemplate,
             BlobStoreListContainerOptionsToListObjectOptions listContainerOptionsToListObjectOptions,
-            Provider<MultipartUploadStrategy> multipartUploadStrategy, @CurrentProject Supplier<String> projectId) {
+            Provider<MultipartUploadStrategy> multipartUploadStrategy, @CurrentProject Supplier<String> projectId,
+            BlobToHttpGetOptions blob2ObjectGetOptions) {
       super(context, blobUtils, defaultLocation, locations);
       this.api = api;
       this.bucketToStorageMetadata = bucketToStorageMetadata;
@@ -104,6 +109,7 @@ public final class GoogleCloudStorageBlobStore extends BaseBlobStore {
       this.listContainerOptionsToListObjectOptions = listContainerOptionsToListObjectOptions;
       this.projectId = projectId;
       this.multipartUploadStrategy = multipartUploadStrategy;
+      this.blob2ObjectGetOptions = checkNotNull(blob2ObjectGetOptions, "blob2ObjectGetOptions");
    }
 
    @Override
@@ -226,7 +232,7 @@ public final class GoogleCloudStorageBlobStore extends BaseBlobStore {
 
    @Override
    public String putBlob(String container, Blob blob, PutOptions options) {
-      if (options.multipart().isMultipart()) {
+      if (options.isMultipart()) {
          return multipartUploadStrategy.get().execute(container, blob);
       } else {
          return putBlob(container, blob);
@@ -244,10 +250,11 @@ public final class GoogleCloudStorageBlobStore extends BaseBlobStore {
       if (gcsObject == null) {
          return null;
       }
+      org.jclouds.http.options.GetOptions httpOptions = blob2ObjectGetOptions.apply(options);
       MutableBlobMetadata metadata = objectToBlobMetadata.apply(gcsObject);
       Blob blob = new BlobImpl(metadata);
       // TODO: Does getObject not get the payload?!
-      Payload payload = api.getObjectApi().download(container, name).getPayload();
+      Payload payload = api.getObjectApi().download(container, name, httpOptions).getPayload();
       payload.setContentMetadata(metadata.getContentMetadata()); // Doing this first retains it on setPayload.
       blob.setPayload(payload);
       return blob;
@@ -291,12 +298,59 @@ public final class GoogleCloudStorageBlobStore extends BaseBlobStore {
    @Override
    protected boolean deleteAndVerifyContainerGone(String container) {
       ListPageWithPrefixes<GoogleCloudStorageObject> list = api.getObjectApi().listObjects(container);
-      if (list == null) {
-         return api.getBucketApi().deleteBucket(container);
+
+      if (list == null || (!list.iterator().hasNext() && list.prefixes().isEmpty())) {
+         if (!api.getBucketApi().deleteBucket(container)) {
+            return true;
+         } else {
+            return !api.getBucketApi().bucketExist(container);
+         }
       }
-      if (!list.iterator().hasNext() && list.prefixes().isEmpty())
-         return api.getBucketApi().deleteBucket(container);
 
       return false;
+   }
+
+   @Override
+   public String copyBlob(String fromContainer, String fromName, String toContainer, String toName,
+         CopyOptions options) {
+      if (!options.getContentMetadata().isPresent() && !options.getUserMetadata().isPresent()) {
+         return api.getObjectApi().copyObject(toContainer, toName, fromContainer, fromName).etag();
+      }
+
+      ObjectTemplate template = new ObjectTemplate();
+
+      if (options.getContentMetadata().isPresent()) {
+         ContentMetadata contentMetadata = options.getContentMetadata().get();
+
+         String contentDisposition = contentMetadata.getContentDisposition();
+         if (contentDisposition != null) {
+            template.contentDisposition(contentDisposition);
+         }
+
+         // TODO: causes failures with subsequent GET operations:
+         // HTTP/1.1 failed with response: HTTP/1.1 503 Service Unavailable; content: [Service Unavailable]
+/*
+         String contentEncoding = contentMetadata.getContentEncoding();
+         if (contentEncoding != null) {
+            template.contentEncoding(contentEncoding);
+         }
+*/
+
+         String contentLanguage = contentMetadata.getContentLanguage();
+         if (contentLanguage != null) {
+            template.contentLanguage(contentLanguage);
+         }
+
+         String contentType = contentMetadata.getContentType();
+         if (contentType != null) {
+            template.contentType(contentType);
+         }
+      }
+
+      if (options.getUserMetadata().isPresent()) {
+         template.customMetadata(options.getUserMetadata().get());
+      }
+
+      return api.getObjectApi().copyObject(toContainer, toName, fromContainer, fromName, template).etag();
    }
 }

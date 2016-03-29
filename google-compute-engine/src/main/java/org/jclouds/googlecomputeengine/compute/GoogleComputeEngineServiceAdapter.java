@@ -24,14 +24,27 @@ import static java.lang.String.format;
 import static org.jclouds.googlecloud.internal.ListPages.concat;
 import static org.jclouds.googlecomputeengine.config.GoogleComputeEngineProperties.IMAGE_PROJECTS;
 
-import java.net.URI;
-import java.util.List;
-import java.util.Map;
-import java.util.concurrent.atomic.AtomicReference;
-
 import javax.inject.Inject;
 import javax.inject.Named;
+import java.net.URI;
 
+import java.security.KeyPair;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.List;
+import java.util.Map;
+
+import java.security.NoSuchAlgorithmException;
+import java.security.spec.InvalidKeySpecException;
+
+import com.google.common.base.Predicate;
+import com.google.common.base.Splitter;
+import com.google.common.base.Strings;
+import com.google.common.collect.ImmutableList;
+import com.google.common.collect.Iterables;
+import com.google.common.collect.Lists;
+import com.google.common.util.concurrent.Atomics;
+import com.google.common.util.concurrent.UncheckedTimeoutException;
+import com.google.gson.Gson;
 import org.jclouds.compute.ComputeServiceAdapter;
 import org.jclouds.compute.domain.Hardware;
 import org.jclouds.compute.domain.NodeMetadata;
@@ -46,26 +59,19 @@ import org.jclouds.googlecomputeengine.compute.functions.FirewallTagNamingConven
 import org.jclouds.googlecomputeengine.compute.functions.Resources;
 import org.jclouds.googlecomputeengine.compute.options.GoogleComputeEngineTemplateOptions;
 import org.jclouds.googlecomputeengine.domain.AttachDisk;
+import org.jclouds.googlecomputeengine.domain.DiskType;
 import org.jclouds.googlecomputeengine.domain.Image;
 import org.jclouds.googlecomputeengine.domain.Instance;
 import org.jclouds.googlecomputeengine.domain.Instance.Scheduling;
 import org.jclouds.googlecomputeengine.domain.Instance.Scheduling.OnHostMaintenance;
 import org.jclouds.googlecomputeengine.domain.MachineType;
+import org.jclouds.googlecomputeengine.domain.Metadata;
 import org.jclouds.googlecomputeengine.domain.NewInstance;
 import org.jclouds.googlecomputeengine.domain.Operation;
 import org.jclouds.googlecomputeengine.domain.Region;
 import org.jclouds.googlecomputeengine.domain.Zone;
 import org.jclouds.googlecomputeengine.features.InstanceApi;
 import org.jclouds.location.suppliers.all.JustProvider;
-
-import com.google.common.base.Predicate;
-import com.google.common.base.Splitter;
-import com.google.common.base.Strings;
-import com.google.common.collect.ImmutableList;
-import com.google.common.collect.Iterables;
-import com.google.common.collect.Lists;
-import com.google.common.util.concurrent.Atomics;
-import com.google.common.util.concurrent.UncheckedTimeoutException;
 
 /**
  * This implementation maps the following:
@@ -115,15 +121,20 @@ public final class GoogleComputeEngineServiceAdapter
       checkNotNull(template.getHardware().getUri(), "hardware must have a URI");
       checkNotNull(template.getImage().getUri(), "image URI is null");
 
+      String zone = template.getLocation().getId();
+
       List<AttachDisk> disks = Lists.newArrayList();
-      disks.add(AttachDisk.newBootDisk(template.getImage().getUri()));
+      disks.add(AttachDisk.newBootDisk(template.getImage().getUri(), getDiskTypeArgument(options, zone)));
+
+      Scheduling scheduling = getScheduling(options);
 
       NewInstance newInstance = NewInstance.create(
             name, // name
             template.getHardware().getUri(), // machineType
             options.network(), // network
             disks, // disks
-            group // description
+            group, // description
+            scheduling
       );
 
       // Add tags from template and for security groups
@@ -142,7 +153,6 @@ public final class GoogleComputeEngineServiceAdapter
                format("%s:%s %s@localhost", credentials.getUser(), options.getPublicKey(), credentials.getUser()));
       }
 
-      String zone = template.getLocation().getId();
       InstanceApi instanceApi = api.instancesInZone(zone);
       Operation create = instanceApi.create(newInstance);
 
@@ -163,12 +173,51 @@ public final class GoogleComputeEngineServiceAdapter
             null, // disks
             newInstance.metadata(), // metadata
             null, // serviceAccounts
-            Scheduling.create(OnHostMaintenance.MIGRATE, true) // scheduling
-      ));
+            scheduling) // scheduling
+      );
       checkState(instanceVisible.apply(instance), "instance %s is not api visible!", instance.get());
 
       // Add lookup for InstanceToNodeMetadata
       diskToSourceImage.put(instance.get().disks().get(0).source(), template.getImage().getUri());
+
+      //// Check whether VM is up
+//      credentials.
+      // Generate the public/private key pair for encryption and decryption.
+      KeyPair keys = null;
+      try {
+         WindowsPasswordGenerator windowsPasswordGenerator = new WindowsPasswordGenerator();
+         keys = windowsPasswordGenerator.generateKeys();
+
+         Metadata metadata = instance.get().metadata();
+
+         // Update metadata from instance with new windows-keys entry.
+         windowsPasswordGenerator.replaceMetadata(metadata, windowsPasswordGenerator.buildKeyMetadata(keys));
+
+         // Tell Compute Engine to update the instance metadata with our changes.
+         instanceApi.setMetadata(instance.get().id(), metadata); //.name()
+
+         System.out.println("Updating metadata...");
+
+         // Sleep while waiting for metadata to propagate - production code may
+         // want to monitor the status of the metadata update operation.
+            Thread.sleep(15000);
+
+         Instance.SerialPortOutput serialPortOutput = instanceApi.getSerialPortOutput(instance.get().id());
+
+         // Get the last line - this will be a JSON string corresponding to the
+         // most recent password reset attempt.
+         String[] entries = serialPortOutput.contents().split("\\n");
+
+         Map<String, String> passwordDict = new Gson().fromJson(entries[entries.length - 1], Map.class);
+         String encryptedPassword = passwordDict.get("encryptedPassword");
+         credentials = windowsPasswordGenerator.credentialsWithNewPassword(credentials, windowsPasswordGenerator.decryptPassword(encryptedPassword, keys));
+      } catch (InterruptedException e) {
+         throw new RuntimeException(e);
+      } catch (NoSuchAlgorithmException e) {
+         throw new RuntimeException(e);
+      } catch (InvalidKeySpecException e) {
+         throw new RuntimeException(e);
+      }
 
       return new NodeAndInitialCredentials<Instance>(instance.get(), instance.get().selfLink().toString(), credentials);
    }
@@ -243,12 +292,12 @@ public final class GoogleComputeEngineServiceAdapter
       waitOperationDone(resources.resetInstance(URI.create(checkNotNull(selfLink, "id"))));
    }
 
-   @Override public void resumeNode(String name) {
-      throw new UnsupportedOperationException("resume is not supported by GCE");
+   @Override public void resumeNode(String selfLink) {
+      waitOperationDone(resources.startInstance(URI.create(checkNotNull(selfLink, "id"))));
    }
 
-   @Override  public void suspendNode(String name) {
-      throw new UnsupportedOperationException("suspend is not supported by GCE");
+   @Override public void suspendNode(String selfLink) {
+      waitOperationDone(resources.stopInstance(URI.create(checkNotNull(selfLink, "id"))));
    }
 
    private void waitOperationDone(Operation operation) {
@@ -288,5 +337,29 @@ public final class GoogleComputeEngineServiceAdapter
    private static String toName(URI link) {
       String path = link.getPath();
       return path.substring(path.lastIndexOf('/') + 1);
+   }
+
+   private URI getDiskTypeArgument(GoogleComputeEngineTemplateOptions options, String zone) {
+      if (options.bootDiskType() != null) {
+         DiskType diskType = api.diskTypesInZone(zone).get(options.bootDiskType());
+         if (diskType != null) {
+            return diskType.selfLink();
+         }
+      }
+
+      return null;
+   }
+
+   public Scheduling getScheduling(GoogleComputeEngineTemplateOptions options) {
+      OnHostMaintenance onHostMaintenance = OnHostMaintenance.MIGRATE;
+      boolean automaticRestart = true;
+
+      // Preemptible instances cannot use a MIGRATE maintenance strategy or automatic restarts
+      if (options.preemptible()) {
+         onHostMaintenance = OnHostMaintenance.TERMINATE;
+         automaticRestart = false;
+      }
+
+      return Scheduling.create(onHostMaintenance, automaticRestart, options.preemptible());
    }
 }

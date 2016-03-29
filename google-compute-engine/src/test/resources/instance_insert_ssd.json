@@ -15,7 +15,8 @@
     {
       "type": "PERSISTENT",
       "initializeParams": {
-        "sourceImage": "%s"
+        "sourceImage": "%s",
+        "diskType": "https://content.googleapis.com/compute/v1/projects/party/zones/us-central1-a/diskTypes/pd-ssd"
       },
       "boot": true,
       "autoDelete": true

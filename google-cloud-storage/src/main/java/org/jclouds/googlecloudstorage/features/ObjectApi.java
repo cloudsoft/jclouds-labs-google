@@ -31,11 +31,11 @@ import javax.ws.rs.Produces;
 
 import org.jclouds.Fallbacks.FalseOnNotFoundOr404;
 import org.jclouds.Fallbacks.NullOnNotFoundOr404;
-import org.jclouds.Fallbacks.TrueOnNotFoundOr404;
 import org.jclouds.googlecloudstorage.binders.MultipartUploadBinder;
 import org.jclouds.googlecloudstorage.binders.UploadBinder;
 import org.jclouds.googlecloudstorage.domain.GoogleCloudStorageObject;
 import org.jclouds.googlecloudstorage.domain.ListPageWithPrefixes;
+import org.jclouds.googlecloudstorage.domain.RewriteResponse;
 import org.jclouds.googlecloudstorage.domain.templates.ComposeObjectTemplate;
 import org.jclouds.googlecloudstorage.domain.templates.ObjectTemplate;
 import org.jclouds.googlecloudstorage.options.ComposeObjectOptions;
@@ -44,8 +44,10 @@ import org.jclouds.googlecloudstorage.options.DeleteObjectOptions;
 import org.jclouds.googlecloudstorage.options.GetObjectOptions;
 import org.jclouds.googlecloudstorage.options.InsertObjectOptions;
 import org.jclouds.googlecloudstorage.options.ListObjectOptions;
+import org.jclouds.googlecloudstorage.options.RewriteObjectOptions;
 import org.jclouds.googlecloudstorage.options.UpdateObjectOptions;
 import org.jclouds.googlecloudstorage.parser.ParseToPayloadEnclosing;
+import org.jclouds.http.options.HttpRequestOptions;
 import org.jclouds.io.Payload;
 import org.jclouds.io.PayloadEnclosing;
 import org.jclouds.javax.annotation.Nullable;
@@ -113,7 +115,8 @@ public interface ObjectApi {
     * @param objectName
     *           Name of the object
     * @param options
-    *           Supply {@link GetObjectOptions} with optional query parameters
+    *           A class that implements {@link HttpRequestOptions}
+    *           such as {@link GetObjectOptions} with optional query parameters
     *
     * @return a {@link GoogleCloudStorageObject}
     */
@@ -124,7 +127,7 @@ public interface ObjectApi {
    @Fallback(NullOnNotFoundOr404.class)
    @Nullable
    GoogleCloudStorageObject getObject(@PathParam("bucket") String bucketName, @PathParam("object") String objectName,
-            GetObjectOptions options);
+         HttpRequestOptions options);
 
    /**
     * Retrieve an object or their metadata
@@ -153,7 +156,8 @@ public interface ObjectApi {
     * @param objectName
     *           Name of the object
     * @param options
-    *           Supply {@link GetObjectOptions} with optional query parameters
+    *           A class that implements {@link HttpRequestOptions}
+    *           such as {@link GetObjectOptions} with optional query parameters
     *
     * @return a {@link GoogleCloudStorageObject}
     */
@@ -164,10 +168,10 @@ public interface ObjectApi {
    @ResponseParser(ParseToPayloadEnclosing.class)
    @Fallback(NullOnNotFoundOr404.class)
    @Nullable PayloadEnclosing download(@PathParam("bucket") String bucketName, @PathParam("object") String objectName,
-            GetObjectOptions options);
+         HttpRequestOptions options);
 
    /**
-    * Stores a new object.Bject metadata setting is not supported with simple uploads
+    * Stores a new object. Object metadata setting is not supported with simple uploads
     *
     * @see https://developers.google.com/storage/docs/json_api/v1/how-tos/upload#simple
     *
@@ -199,7 +203,7 @@ public interface ObjectApi {
    @Named("Object:delete")
    @DELETE
    @Path("storage/v1/b/{bucket}/o/{object}")
-   @Fallback(TrueOnNotFoundOr404.class)
+   @Fallback(FalseOnNotFoundOr404.class)
    boolean deleteObject(@PathParam("bucket") String bucketName, @PathParam("object") String objectName);
 
    /**
@@ -216,7 +220,7 @@ public interface ObjectApi {
    @Named("Object:delete")
    @DELETE
    @Path("storage/v1/b/{bucket}/o/{object}")
-   @Fallback(TrueOnNotFoundOr404.class)
+   @Fallback(FalseOnNotFoundOr404.class)
    boolean deleteObject(@PathParam("bucket") String bucketName, @PathParam("object") String objectName,
             DeleteObjectOptions options);
 
@@ -381,7 +385,7 @@ public interface ObjectApi {
             ComposeObjectOptions options);
 
    /**
-    * Copies an object to a specified location. Optionally overrides metadata.
+    * Copies an object to a specified location.
     *
     * @param destinationBucket
     *           Name of the bucket in which to store the new object
@@ -401,6 +405,30 @@ public interface ObjectApi {
    GoogleCloudStorageObject copyObject(@PathParam("destinationBucket") String destinationBucket,
             @PathParam("destinationObject") String destinationObject, @PathParam("sourceBucket") String sourceBucket,
             @PathParam("sourceObject") String sourceObject);
+
+    /**
+     * Copies an object to a specified location with updated metadata.
+     *
+     * @param destinationBucket
+     *           Name of the bucket in which to store the new object
+     * @param destinationObject
+     *           Name of the new object.
+     * @param sourceBucket
+     *           Name of the bucket in which to find the source object
+     * @param sourceObject
+     *           Name of the source object
+     * @param template
+     *           Supply a {@link CopyObjectOptions}
+     *
+     * @return a {@link GoogleCloudStorageObject}
+     */
+    @Named("Object:copy")
+    @POST
+    @Consumes(APPLICATION_JSON)
+    @Path("/storage/v1/b/{sourceBucket}/o/{sourceObject}/copyTo/b/{destinationBucket}/o/{destinationObject}")
+    GoogleCloudStorageObject copyObject(@PathParam("destinationBucket") String destinationBucket,
+                                        @PathParam("destinationObject") String destinationObject, @PathParam("sourceBucket") String sourceBucket,
+                                        @PathParam("sourceObject") String sourceObject, @BinderParam(BindToJsonPayload.class) ObjectTemplate template);
 
    /**
     * Copies an object to a specified location. Optionally overrides metadata.
@@ -447,4 +475,53 @@ public interface ObjectApi {
    GoogleCloudStorageObject multipartUpload(@PathParam("bucket") String bucketName,
             @PayloadParam("template") ObjectTemplate objectTemplate,
             @PayloadParam("payload") Payload payload);
+
+   /**
+    * Rewrites a source object to a destination object.
+    *
+    * @param destinationBucket
+    *           Name of the bucket in which the object to be stored
+    * @param destinationObject
+    *           Name of the new object.
+    * @param sourceBucket
+    *           Name of the bucket in which to find the source object.
+    * @param sourceObject
+    *           Name of the source object.
+    *
+    * @return a {@link RewriteResponse}
+    */
+   @Named("Object:rewrite")
+   @POST
+   @Consumes(APPLICATION_JSON)
+   @Path("/storage/v1/b/{sourceBucket}/o/{sourceObject}/rewriteTo/b/{destinationBucket}/o/{destinationObject}")
+   RewriteResponse rewriteObjects(@PathParam("destinationBucket") String destinationBucket,
+            @PathParam("destinationObject") String destinationObject,
+            @PathParam("sourceBucket") String sourceBucket,
+            @PathParam("sourceObject") String sourceObject);
+
+   /**
+    * Rewrites a source object to a destination object.
+    *
+    * @param destinationBucket
+    *           Name of the bucket in which the object to be stored
+    * @param destinationObject
+    *           Name of the new object.
+    * @param sourceBucket
+    *           Name of the bucket in which to find the source object.
+    * @param sourceObject
+    *           Name of the source object.
+    * @param options
+    *           Supply an {@link RewriteObjectOptions}
+    *
+    * @return a {@link RewriteResponse}
+    */
+   @Named("Object:rewrite")
+   @POST
+   @Consumes(APPLICATION_JSON)
+   @Path("/storage/v1/b/{sourceBucket}/o/{sourceObject}/rewriteTo/b/{destinationBucket}/o/{destinationObject}")
+   RewriteResponse rewriteObjects(@PathParam("destinationBucket") String destinationBucket,
+            @PathParam("destinationObject") String destinationObject,
+            @PathParam("sourceBucket") String sourceBucket,
+            @PathParam("sourceObject") String sourceObject,
+            RewriteObjectOptions options);
 }

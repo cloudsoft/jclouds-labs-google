@@ -20,7 +20,9 @@ import static com.google.common.io.BaseEncoding.base64;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.entry;
 import static org.testng.Assert.assertEquals;
+import static org.testng.Assert.assertFalse;
 import static org.testng.Assert.assertNotNull;
+import static org.testng.Assert.assertTrue;
 
 import java.io.IOException;
 import java.util.List;
@@ -35,6 +37,7 @@ import org.jclouds.googlecloudstorage.domain.DomainResourceReferences.Projection
 import org.jclouds.googlecloudstorage.domain.GoogleCloudStorageObject;
 import org.jclouds.googlecloudstorage.domain.ListPageWithPrefixes;
 import org.jclouds.googlecloudstorage.domain.ObjectAccessControls;
+import org.jclouds.googlecloudstorage.domain.RewriteResponse;
 import org.jclouds.googlecloudstorage.domain.templates.BucketTemplate;
 import org.jclouds.googlecloudstorage.domain.templates.ComposeObjectTemplate;
 import org.jclouds.googlecloudstorage.domain.templates.ObjectTemplate;
@@ -61,18 +64,20 @@ import com.beust.jcommander.internal.Lists;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.hash.Hashing;
 import com.google.common.io.ByteSource;
-import com.google.common.primitives.Bytes;
 
 public class ObjectApiLiveTest extends BaseGoogleCloudStorageApiLiveTest {
 
    private static final String BUCKET_NAME = "jcloudsobjectoperations" + UUID.randomUUID();
-   private static final String BUCKET_NAME2 = "jcloudobjectdestination" + UUID.randomUUID();
+   private static final String BUCKET_NAME2 = "jcloudsobjectdestination" + UUID.randomUUID();
    private static final String UPLOAD_OBJECT_NAME = "objectOperation.txt";
    private static final String UPLOAD_OBJECT_NAME2 = "jcloudslogo.jpg";
    private static final String MULTIPART_UPLOAD_OBJECT = "multipart_related.jpg";
    private static final String COPIED_OBJECT_NAME = "copyofObjectOperation.txt";
+   private static final String COPIED_OBJECT_NAME2 = "copyObjectWithMeta.txt";
    private static final String COMPOSED_OBJECT = "ComposedObject1.txt";
    private static final String COMPOSED_OBJECT2 = "ComposedObject2.json";
+   private static final String NONEXISTENT_OBJECT_NAME = "noSuchObject.txt";
+   private static final String REWRITE_OBJECT_NAME = "rewriteObject.txt";
 
    private PayloadEnclosing testPayload;
    private Long RANDOM_LONG = 100L;
@@ -121,6 +126,20 @@ public class ObjectApiLiveTest extends BaseGoogleCloudStorageApiLiveTest {
    }
 
    @Test(groups = "live", dependsOnMethods = "testSimpleUpload")
+   public void testRewrite() throws IOException {
+      GoogleCloudStorageObject gcsObject = api().getObject(BUCKET_NAME, UPLOAD_OBJECT_NAME);
+      System.out.println(gcsObject);
+
+      RewriteResponse response = api().rewriteObjects(BUCKET_NAME, REWRITE_OBJECT_NAME, BUCKET_NAME, UPLOAD_OBJECT_NAME);
+      assertNotNull(response);
+      assertTrue(response.done());
+      assertEquals(response.objectSize(), 512);
+      assertEquals(response.totalBytesRewritten(), 512);
+      assertEquals(response.rewriteToken(), null);
+      assertNotNull(response.resource());
+   }
+
+   @Test(groups = "live", dependsOnMethods = "testRewrite")
    public void testDownload() throws IOException {
       PayloadEnclosing impl = api().download(BUCKET_NAME, UPLOAD_OBJECT_NAME);
       ContentMetadata meta = impl.getPayload().getContentMetadata();
@@ -202,6 +221,31 @@ public class ObjectApiLiveTest extends BaseGoogleCloudStorageApiLiveTest {
 
    }
 
+   @Test(groups = "live", dependsOnMethods = "testGetObject")
+   public void testCopyObjectWithUpdatedMetadata() throws IOException {
+      String METADATA_KEY = "key1";
+      String METADATA_VALUE = "value1";
+
+      ObjectTemplate template = new ObjectTemplate().contentLanguage("fr").contentType("text/plain")
+               .contentDisposition("attachment").customMetadata(METADATA_KEY, METADATA_VALUE);
+
+      GoogleCloudStorageObject gcsObject = api().copyObject(BUCKET_NAME2, COPIED_OBJECT_NAME2, BUCKET_NAME, UPLOAD_OBJECT_NAME, template);
+
+      assertNotNull(gcsObject);
+      assertEquals(gcsObject.bucket(), BUCKET_NAME2);
+      assertEquals(gcsObject.name(), COPIED_OBJECT_NAME2);
+      assertNotNull(gcsObject.acl());
+      assertEquals(gcsObject.contentType(), "text/plain");
+      assertEquals(gcsObject.metadata().get(METADATA_KEY), METADATA_VALUE);
+      assertEquals(gcsObject.contentLanguage(), "fr");
+      // Test for data
+
+      PayloadEnclosing impl = api().download(BUCKET_NAME2, COPIED_OBJECT_NAME2);
+      assertNotNull(impl);
+      assertEquals(ByteStreams2.toByteArrayAndClose(impl.getPayload().openStream()),
+               ByteStreams2.toByteArrayAndClose(testPayload.getPayload().openStream()));
+   }
+
    @Test(groups = "live", dependsOnMethods = "testCopyObject")
    public void testCopyObjectWithOptions() {
       CopyObjectOptions options = new CopyObjectOptions().ifSourceGenerationMatch(generation)
@@ -227,7 +271,10 @@ public class ObjectApiLiveTest extends BaseGoogleCloudStorageApiLiveTest {
       sourceList.add(api().getObject(BUCKET_NAME2, UPLOAD_OBJECT_NAME));
       sourceList.add(api().getObject(BUCKET_NAME2, COPIED_OBJECT_NAME));
 
-      ComposeObjectTemplate requestTemplate = ComposeObjectTemplate.create(sourceList, destination);
+      ComposeObjectTemplate requestTemplate = ComposeObjectTemplate.builder()
+         .fromGoogleCloudStorageObject(sourceList)
+         .destination(destination)
+         .build();
 
       GoogleCloudStorageObject gcsObject = api().composeObjects(BUCKET_NAME2, COMPOSED_OBJECT, requestTemplate);
 
@@ -245,8 +292,10 @@ public class ObjectApiLiveTest extends BaseGoogleCloudStorageApiLiveTest {
       sourceList.add(api().getObject(BUCKET_NAME2, UPLOAD_OBJECT_NAME));
       sourceList.add(api().getObject(BUCKET_NAME2, COPIED_OBJECT_NAME));
 
-      ComposeObjectTemplate requestTemplate = ComposeObjectTemplate.create(sourceList, destination);
-
+      ComposeObjectTemplate requestTemplate =  ComposeObjectTemplate.builder()
+         .fromGoogleCloudStorageObject(sourceList)
+         .destination(destination)
+         .build();
       ComposeObjectOptions options = new ComposeObjectOptions().destinationPredefinedAcl(
                DestinationPredefinedAcl.BUCKET_OWNER_READ).ifMetagenerationNotMatch(RANDOM_LONG);
 
@@ -284,7 +333,6 @@ public class ObjectApiLiveTest extends BaseGoogleCloudStorageApiLiveTest {
 
    @Test(groups = "live", dependsOnMethods = "testComposeObjectWithOptions")
    public void testUpdateObject() {
-
       ObjectAccessControls oacl = ObjectAccessControls.builder().bucket(BUCKET_NAME).entity("allUsers")
                .role(ObjectRole.OWNER).build();
 
@@ -403,13 +451,16 @@ public class ObjectApiLiveTest extends BaseGoogleCloudStorageApiLiveTest {
 
    @Test(groups = "live", dependsOnMethods = "testMultipartJpegUpload")
    public void testDeleteObject() {
-      api().deleteObject(BUCKET_NAME2, UPLOAD_OBJECT_NAME);
-      api().deleteObject(BUCKET_NAME2, COMPOSED_OBJECT2);
-      api().deleteObject(BUCKET_NAME2, COMPOSED_OBJECT);
-      api().deleteObject(BUCKET_NAME2, COPIED_OBJECT_NAME);
-      api().deleteObject(BUCKET_NAME, UPLOAD_OBJECT_NAME);
-      api().deleteObject(BUCKET_NAME, UPLOAD_OBJECT_NAME2);
-      api().deleteObject(BUCKET_NAME, MULTIPART_UPLOAD_OBJECT);
+      assertTrue(api().deleteObject(BUCKET_NAME2, UPLOAD_OBJECT_NAME));
+      assertTrue(api().deleteObject(BUCKET_NAME2, COMPOSED_OBJECT2));
+      assertTrue(api().deleteObject(BUCKET_NAME2, COMPOSED_OBJECT));
+      assertTrue(api().deleteObject(BUCKET_NAME2, COPIED_OBJECT_NAME));
+      assertTrue(api().deleteObject(BUCKET_NAME2, COPIED_OBJECT_NAME2));
+      assertFalse(api().deleteObject(BUCKET_NAME, UPLOAD_OBJECT_NAME));
+      assertTrue(api().deleteObject(BUCKET_NAME, UPLOAD_OBJECT_NAME2));
+      assertTrue(api().deleteObject(BUCKET_NAME, MULTIPART_UPLOAD_OBJECT));
+      assertTrue(api().deleteObject(BUCKET_NAME, REWRITE_OBJECT_NAME));
+      assertFalse(api().deleteObject(BUCKET_NAME, NONEXISTENT_OBJECT_NAME));
    }
 
    @Test(groups = "live", dependsOnMethods = "testPatchObjectsWithOptions")
@@ -423,11 +474,5 @@ public class ObjectApiLiveTest extends BaseGoogleCloudStorageApiLiveTest {
    private void deleteBucket() {
       api.getBucketApi().deleteBucket(BUCKET_NAME);
       api.getBucketApi().deleteBucket(BUCKET_NAME2);
-   }
-
-   private static byte[] reverse(byte[] b) {
-      List<Byte> hashByte = Bytes.asList(b);
-      List<Byte> reversedList = com.google.common.collect.Lists.reverse(hashByte);
-      return Bytes.toArray(reversedList);
    }
 }

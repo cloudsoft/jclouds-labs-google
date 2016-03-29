@@ -39,10 +39,13 @@ import org.jclouds.compute.ComputeServiceAdapter;
 import org.jclouds.compute.config.ComputeServiceAdapterContextModule;
 import org.jclouds.compute.domain.Hardware;
 import org.jclouds.compute.domain.NodeMetadata;
+import org.jclouds.compute.domain.OperatingSystem;
+import org.jclouds.compute.domain.OsFamily;
 import org.jclouds.compute.extensions.ImageExtension;
 import org.jclouds.compute.extensions.SecurityGroupExtension;
 import org.jclouds.compute.options.TemplateOptions;
 import org.jclouds.domain.Location;
+import org.jclouds.domain.LoginCredentials;
 import org.jclouds.googlecomputeengine.compute.GoogleComputeEngineService;
 import org.jclouds.googlecomputeengine.compute.GoogleComputeEngineServiceAdapter;
 import org.jclouds.googlecomputeengine.compute.domain.NetworkAndAddressRange;
@@ -50,12 +53,13 @@ import org.jclouds.googlecomputeengine.compute.functions.CreateNetworkIfNeeded;
 import org.jclouds.googlecomputeengine.compute.functions.FindNetworkOrCreate;
 import org.jclouds.googlecomputeengine.compute.functions.FirewallTagNamingConvention;
 import org.jclouds.googlecomputeengine.compute.functions.GoogleComputeEngineImageToImage;
+import org.jclouds.googlecomputeengine.compute.functions.ImageNameToOperatingSystem;
 import org.jclouds.googlecomputeengine.compute.functions.InstanceToNodeMetadata;
 import org.jclouds.googlecomputeengine.compute.functions.MachineTypeToHardware;
 import org.jclouds.googlecomputeengine.compute.functions.OrphanedGroupsFromDeadNodes;
 import org.jclouds.googlecomputeengine.compute.functions.Resources;
 import org.jclouds.googlecomputeengine.compute.options.GoogleComputeEngineTemplateOptions;
-import org.jclouds.googlecomputeengine.compute.predicates.AllNodesInGroupTerminated;
+import org.jclouds.googlecomputeengine.compute.predicates.GroupIsEmpty;
 import org.jclouds.googlecomputeengine.compute.predicates.AtomicInstanceVisible;
 import org.jclouds.googlecomputeengine.compute.predicates.AtomicOperationDone;
 import org.jclouds.googlecomputeengine.compute.strategy.CreateNodesWithGroupEncodedIntoNameThenAddToSet;
@@ -119,7 +123,10 @@ public final class GoogleComputeEngineServiceContextModule
       }).to(OrphanedGroupsFromDeadNodes.class);
 
       bind(new TypeLiteral<Predicate<String>>() {
-      }).to(AllNodesInGroupTerminated.class);
+      }).to(GroupIsEmpty.class);
+      
+      bind(new TypeLiteral<Function<String, OperatingSystem>>() {
+      }).to(ImageNameToOperatingSystem.class);
 
       bind(new TypeLiteral<Function<NetworkAndAddressRange, Network>>() {
       }).to(CreateNetworkIfNeeded.class);
@@ -172,6 +179,27 @@ public final class GoogleComputeEngineServiceContextModule
          }
       }, seconds, SECONDS);
    }
+   
+   @Override
+   protected Map<OsFamily, LoginCredentials> osFamilyToCredentials(Injector injector) {
+      // GCE does not enable the 'root' account for ssh access by default, but it will create a privileged
+      // user when the SSH key is provided. Populate the map to use 'jclouds' as a default user.
+      ImmutableMap.Builder<OsFamily, LoginCredentials> builder = ImmutableMap.builder();
+      for (OsFamily family : OsFamily.values()) {
+         switch (family) {
+            case COREOS:
+               builder.put(family, LoginCredentials.builder().user("core").build());
+               break;
+            case WINDOWS:
+               builder.put(family, LoginCredentials.builder().user("Administrator").build());
+               break;
+            default:
+               builder.put(family, LoginCredentials.builder().user("jclouds").build());
+               break;
+         }
+      }
+      return builder.build();
+   }
 
    @Provides @Singleton
    LoadingCache<NetworkAndAddressRange, Network> networkMap(CacheLoader<NetworkAndAddressRange, Network> in) {
@@ -193,7 +221,7 @@ public final class GoogleComputeEngineServiceContextModule
                      .put(Instance.Status.RUNNING, NodeMetadata.Status.RUNNING)
                      .put(Instance.Status.STOPPING, NodeMetadata.Status.PENDING)
                      .put(Instance.Status.STOPPED, NodeMetadata.Status.SUSPENDED)
-                     .put(Instance.Status.TERMINATED, NodeMetadata.Status.TERMINATED).build();
+                     .put(Instance.Status.TERMINATED, NodeMetadata.Status.SUSPENDED).build();
 
    @Provides Map<Instance.Status, NodeMetadata.Status> toPortableNodeStatus() {
       return toPortableNodeStatus;

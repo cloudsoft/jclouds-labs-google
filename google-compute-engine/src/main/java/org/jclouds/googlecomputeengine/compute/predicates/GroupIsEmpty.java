@@ -14,25 +14,29 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.jclouds.oauth.v2.config;
+package org.jclouds.googlecomputeengine.compute.predicates;
 
-import static com.google.common.base.CaseFormat.LOWER_CAMEL;
-import static com.google.common.base.CaseFormat.UPPER_UNDERSCORE;
-import static com.google.common.base.Preconditions.checkNotNull;
+import static com.google.common.collect.Iterables.isEmpty;
+import static com.google.common.collect.Sets.filter;
+import static org.jclouds.compute.predicates.NodePredicates.all;
+import static org.jclouds.compute.predicates.NodePredicates.inGroup;
 
-/** Defines the contents of the credential field in {@link org.jclouds.ContextBuilder#credentials(String, String)}. */
-public enum CredentialType {
+import javax.inject.Inject;
 
-   BEARER_TOKEN_CREDENTIALS,
+import org.jclouds.compute.ComputeService;
 
-   /** Contents are a PEM-encoded P12 Private Key. */
-   P12_PRIVATE_KEY_CREDENTIALS;
+import com.google.common.base.Predicate;
 
-   @Override public String toString() {
-      return UPPER_UNDERSCORE.to(LOWER_CAMEL, name());
+public final class GroupIsEmpty implements Predicate<String> {
+
+   private final ComputeService computeService;
+
+   @Inject GroupIsEmpty(ComputeService computeService) {
+      this.computeService = computeService;
    }
 
-   public static CredentialType fromValue(String credentialType) {
-      return valueOf(LOWER_CAMEL.to(UPPER_UNDERSCORE, checkNotNull(credentialType, "credentialType")));
+
+   @Override public boolean apply(String groupName) {
+      return isEmpty(filter(computeService.listNodesDetailsMatching(all()), inGroup(groupName)));
    }
 }

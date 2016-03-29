@@ -18,7 +18,6 @@ package org.jclouds.googlecomputeengine.compute;
 
 import static com.google.common.collect.Iterables.getOnlyElement;
 import static org.jclouds.googlecomputeengine.domain.Instance.Status.RUNNING;
-import static org.jclouds.googlecomputeengine.domain.Instance.Status.TERMINATED;
 import static org.testng.Assert.assertEquals;
 import static org.testng.Assert.assertNotNull;
 import static org.testng.Assert.assertNull;
@@ -77,12 +76,13 @@ public class GoogleComputeEngineServiceMockTest extends BaseGoogleComputeEngineA
       server.enqueue(instanceWithNetworkAndStatus("test-delete-networks", "test-network", RUNNING));
       server.enqueue(singleRegionSingleZoneResponse());
       server.enqueue(jsonResponse("/aggregated_machinetype_list.json"));
+      server.enqueue(instanceWithNetworkAndStatus("test-delete-networks", "test-network", RUNNING));
       server.enqueue(jsonResponse("/operation.json"));
       server.enqueue(jsonResponse("/zone_operation.json"));
-      server.enqueue(instanceWithNetworkAndStatus("test-delete-networks", "test-network", TERMINATED));
-      server.enqueue(aggregatedListWithInstanceNetworkAndStatus("test-delete-networks", "test-network", TERMINATED));
-      server.enqueue(jsonResponse("/GoogleComputeEngineServiceExpectTest/network_get.json"));
-      server.enqueue(jsonResponse("/GoogleComputeEngineServiceExpectTest/firewall_list.json"));
+      server.enqueue(response404()); // deleted instance no longer exists
+      server.enqueue(aggregatedListInstanceEmpty());
+      server.enqueue(jsonResponse("/network_get.json"));
+      server.enqueue(jsonResponse("/firewall_list_compute.json"));
       server.enqueue(jsonResponse("/operation.json"));
       server.enqueue(jsonResponse("/zone_operation.json"));
       server.enqueue(jsonResponse("/operation.json"));
@@ -94,6 +94,7 @@ public class GoogleComputeEngineServiceMockTest extends BaseGoogleComputeEngineA
       assertSent(server, "GET", "/jclouds/zones/us-central1-a/instances/test-delete-networks");
       assertSent(server, "GET", "/projects/party/regions");
       assertSent(server, "GET", "/projects/party/aggregated/machineTypes");
+      assertSent(server, "GET", "/jclouds/zones/us-central1-a/instances/test-delete-networks");
       assertSent(server, "DELETE", "/jclouds/zones/us-central1-a/instances/test-delete-networks");
       assertSent(server, "GET", "/projects/party/zones/us-central1-a/operations/operation-1354084865060");
       assertSent(server, "GET", "/projects/party/zones/us-central1-a/instances/test-delete-networks");
@@ -197,10 +198,62 @@ public class GoogleComputeEngineServiceMockTest extends BaseGoogleComputeEngineA
       assertSent(server, "GET", "/projects/party/zones/us-central1-a/instances/test-1");
    }
 
+   public void createNodeWithSpecificDiskType() throws Exception {
+      server.enqueue(singleRegionSingleZoneResponse());
+      server.enqueue(jsonResponse("/image_list.json"));
+      server.enqueue(jsonResponse("/image_list_debian.json")); // per IMAGE_PROJECTS = "debian-cloud"
+      server.enqueue(jsonResponse("/aggregated_machinetype_list.json"));
+      server.enqueue(jsonResponse("/network_get.json"));
+      server.enqueue(new MockResponse().setResponseCode(404)); // Get Firewall
+      server.enqueue(jsonResponse("/operation.json")); // Create Firewall
+      server.enqueue(jsonResponse("/zone_operation.json"));
+      server.enqueue(aggregatedListWithInstanceNetworkAndStatus("test-0", "test-network", RUNNING));
+      server.enqueue(jsonResponse("/disktype_ssd.json"));
+      server.enqueue(jsonResponse("/operation.json")); // Create Instance
+      server.enqueue(instanceWithNetworkAndStatusAndSsd("test-1", "test-network", RUNNING));
+
+      ComputeService computeService = computeService();
+
+      GoogleComputeEngineTemplateOptions options = computeService.templateOptions()
+            .as(GoogleComputeEngineTemplateOptions.class).autoCreateKeyPair(false)
+            .tags(ImmutableSet.of("aTag")).blockUntilRunning(false)
+            .bootDiskType("pd-ssd");
+
+      Template template = computeService.templateBuilder().options(options).build();
+      NodeMetadata node = getOnlyElement(computeService.createNodesInGroup("test", 1, template));
+
+      // prove our caching works.
+      assertEquals(node.getImageId(), template.getImage().getId());
+      assertEquals(node.getLocation().getId(), template.getLocation().getId());
+
+      assertSent(server, "GET", "/projects/party/regions");
+      assertSent(server, "GET", "/projects/party/global/images");
+      assertSent(server, "GET", "/projects/debian-cloud/global/images");
+      assertSent(server, "GET", "/projects/party/aggregated/machineTypes");
+      assertSent(server, "GET", "/projects/party/global/networks/jclouds-test");
+      assertSent(server, "GET", "/projects/party/global/firewalls/jclouds-test-port-22"); // Get Firewall
+      assertSent(server, "POST", "/projects/party/global/firewalls", // Create Firewall
+            stringFromResource("/firewall_insert_2.json"));
+
+      assertSent(server, "GET", "/projects/party/zones/us-central1-a/operations/operation-1354084865060");
+      assertSent(server, "GET", "/projects/party/aggregated/instances");
+      assertSent(server, "GET", "/projects/party/zones/us-central1-a/diskTypes/pd-ssd");
+      assertSent(server, "POST", "/projects/party/zones/us-central1-a/instances",
+            String.format(stringFromResource("/instance_insert_ssd.json"), template.getHardware().getId(), template.getImage().getId()));
+
+      assertSent(server, "GET", "/projects/party/zones/us-central1-a/instances/test-1");
+   }
+
    private MockResponse instanceWithNetworkAndStatus(String instanceName, String networkName, Instance.Status status) {
       return new MockResponse().setBody(
             stringFromResource("/instance_get.json").replace("test-0", instanceName).replace("default", networkName)
                   .replace("RUNNING", status.toString()));
+   }
+
+   private MockResponse instanceWithNetworkAndStatusAndSsd(String instanceName, String networkName, Instance.Status status) {
+      return new MockResponse().setBody(
+            stringFromResource("/instance_get.json").replace("test-0", instanceName).replace("default", networkName)
+                  .replace("RUNNING", status.toString()).replace("pd-standard", "pd-ssd"));
    }
 
    private MockResponse aggregatedListWithInstanceNetworkAndStatus(String instanceName, String networkName,
@@ -208,6 +261,10 @@ public class GoogleComputeEngineServiceMockTest extends BaseGoogleComputeEngineA
       return new MockResponse().setBody(
             stringFromResource("/aggregated_instance_list.json").replace("test-0", instanceName)
                   .replace("default", networkName).replace("RUNNING", status.toString()));
+   }
+   
+   private MockResponse aggregatedListInstanceEmpty() {
+      return new MockResponse().setBody(stringFromResource("/aggregated_instance_list_empty.json"));
    }
 }
 

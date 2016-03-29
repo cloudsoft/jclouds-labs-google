@@ -34,8 +34,10 @@ import org.jclouds.googlecloudstorage.options.CopyObjectOptions;
 import org.jclouds.googlecloudstorage.options.GetObjectOptions;
 import org.jclouds.googlecloudstorage.options.InsertObjectOptions;
 import org.jclouds.googlecloudstorage.options.ListObjectOptions;
+import org.jclouds.googlecloudstorage.options.RewriteObjectOptions;
 import org.jclouds.googlecloudstorage.parse.ParseGoogleCloudStorageObject;
 import org.jclouds.googlecloudstorage.parse.ParseGoogleCloudStorageObjectListTest;
+import org.jclouds.googlecloudstorage.parse.ParseObjectRewriteResponse;
 import org.jclouds.http.internal.PayloadEnclosingImpl;
 import org.jclouds.io.PayloadEnclosing;
 import org.testng.annotations.Test;
@@ -81,10 +83,12 @@ public class ObjectApiMockTest extends BaseGoogleCloudStorageApiMockTest {
       server.enqueue(jsonResponse("/object_get.json"));
 
       GetObjectOptions options = new GetObjectOptions().ifGenerationMatch((long) 1000);
+      options.range(0, 1023);
 
       assertEquals(objectApi().getObject("test", "file_name", options),
             new ParseGoogleCloudStorageObject().expected());
-      assertSent(server, "GET", "/storage/v1/b/test/o/file_name?ifGenerationMatch=1000");
+      RecordedRequest request = assertSent(server, "GET", "/storage/v1/b/test/o/file_name?ifGenerationMatch=1000");
+      assertEquals(request.getHeader("Range"), "bytes=0-1023");
    }
 
    public void simpleUpload() throws Exception {
@@ -174,8 +178,9 @@ public class ObjectApiMockTest extends BaseGoogleCloudStorageApiMockTest {
 
       ObjectTemplate template = new ObjectTemplate().name("file_name").size((long) 1000).crc32c("crc32c");
 
-      ComposeObjectTemplate composeTemplate = ComposeObjectTemplate.create(
-            new ParseGoogleCloudStorageObjectListTest().expected(), template);
+      ComposeObjectTemplate composeTemplate = ComposeObjectTemplate.builder()
+      .fromGoogleCloudStorageObject(new ParseGoogleCloudStorageObjectListTest().expected())
+      .destination(template).build();
 
       assertEquals(objectApi().composeObjects("destination_bucket", "destination_object", composeTemplate),
             new ParseGoogleCloudStorageObject().expected());
@@ -187,8 +192,9 @@ public class ObjectApiMockTest extends BaseGoogleCloudStorageApiMockTest {
       server.enqueue(jsonResponse("/object_get.json"));
 
       ObjectTemplate template = new ObjectTemplate().name("file_name").size((long) 1000).crc32c("crc32c");
-      ComposeObjectTemplate composeTemplate = ComposeObjectTemplate.create(
-            new ParseGoogleCloudStorageObjectListTest().expected(), template);
+      ComposeObjectTemplate composeTemplate = ComposeObjectTemplate.builder()
+      .fromGoogleCloudStorageObject(new ParseGoogleCloudStorageObjectListTest().expected())
+      .destination(template).build();
 
       ComposeObjectOptions options = new ComposeObjectOptions()
          .destinationPredefinedAcl(DestinationPredefinedAcl.BUCKET_OWNER_FULLCONTROL)
@@ -209,6 +215,21 @@ public class ObjectApiMockTest extends BaseGoogleCloudStorageApiMockTest {
       assertSent(server, "POST", "/storage/v1/b/source_bucket/o/source_object/copyTo" +
               "/b/destination_bucket/o/destination_object", APPLICATION_JSON);
    }
+
+    public void copy_update_metadata() throws Exception {
+        server.enqueue(jsonResponse("/object_get.json"));
+
+        ObjectTemplate template = new ObjectTemplate().name("file_name").size((long) 1000).crc32c("crc32c");
+
+        assertEquals(objectApi().copyObject("destination_bucket", "destination_object", "source_bucket", "source_object", template),
+                new ParseGoogleCloudStorageObject().expected());
+        assertSent(server, "POST", "/storage/v1/b/source_bucket/o/source_object/copyTo" +
+                "/b/destination_bucket/o/destination_object", APPLICATION_JSON, "{" +
+                "  \"name\": \"file_name\"," +
+                "  \"size\": 1000," +
+                "  \"crc32c\": \"crc32c\"" +
+                "}");
+    }
 
    public void copy_with_options() throws Exception {
       server.enqueue(jsonResponse("/object_get.json"));
@@ -240,6 +261,25 @@ public class ObjectApiMockTest extends BaseGoogleCloudStorageApiMockTest {
       //TODO: this should be a more robust assertion about the formatting of the payload
    }
 
+   public void rewrite() throws Exception {
+      server.enqueue(jsonResponse("/object_rewrite.json"));
+
+      assertEquals(objectApi().rewriteObjects("destinationBucket", "destinationObject", "sourceBucket", "sourceObject"),
+            new ParseObjectRewriteResponse().expected());
+
+      assertSent(server, "POST", "/storage/v1/b/sourceBucket/o/sourceObject/rewriteTo/b/destinationBucket/o/destinationObject");
+   }
+
+   public void rewriteWithOptions() throws Exception {
+      server.enqueue(jsonResponse("/object_rewrite.json"));
+
+      RewriteObjectOptions options = new RewriteObjectOptions.Builder().rewriteToken("rewriteToken");
+      assertEquals(objectApi().rewriteObjects("destinationBucket", "destinationObject", "sourceBucket", "sourceObject", options),
+            new ParseObjectRewriteResponse().expected());
+
+      assertSent(server, "POST",
+            "/storage/v1/b/sourceBucket/o/sourceObject/rewriteTo/b/destinationBucket/o/destinationObject?rewriteToken=rewriteToken");
+   }
 
    public ObjectApi objectApi(){
       return api().getObjectApi();
