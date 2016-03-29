@@ -24,30 +24,18 @@ import static java.lang.String.format;
 import static org.jclouds.googlecloud.internal.ListPages.concat;
 import static org.jclouds.googlecomputeengine.config.GoogleComputeEngineProperties.IMAGE_PROJECTS;
 
-import javax.inject.Inject;
-import javax.inject.Named;
 import java.net.URI;
-
-import java.security.KeyPair;
-import java.util.concurrent.atomic.AtomicReference;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicReference;
 
-import java.security.NoSuchAlgorithmException;
-import java.security.spec.InvalidKeySpecException;
+import javax.inject.Inject;
+import javax.inject.Named;
 
-import com.google.common.base.Predicate;
-import com.google.common.base.Splitter;
-import com.google.common.base.Strings;
-import com.google.common.collect.ImmutableList;
-import com.google.common.collect.Iterables;
-import com.google.common.collect.Lists;
-import com.google.common.util.concurrent.Atomics;
-import com.google.common.util.concurrent.UncheckedTimeoutException;
-import com.google.gson.Gson;
 import org.jclouds.compute.ComputeServiceAdapter;
 import org.jclouds.compute.domain.Hardware;
 import org.jclouds.compute.domain.NodeMetadata;
+import org.jclouds.compute.domain.OsFamily;
 import org.jclouds.compute.domain.Template;
 import org.jclouds.compute.options.TemplateOptions;
 import org.jclouds.domain.Location;
@@ -65,13 +53,22 @@ import org.jclouds.googlecomputeengine.domain.Instance;
 import org.jclouds.googlecomputeengine.domain.Instance.Scheduling;
 import org.jclouds.googlecomputeengine.domain.Instance.Scheduling.OnHostMaintenance;
 import org.jclouds.googlecomputeengine.domain.MachineType;
-import org.jclouds.googlecomputeengine.domain.Metadata;
 import org.jclouds.googlecomputeengine.domain.NewInstance;
 import org.jclouds.googlecomputeengine.domain.Operation;
 import org.jclouds.googlecomputeengine.domain.Region;
 import org.jclouds.googlecomputeengine.domain.Zone;
 import org.jclouds.googlecomputeengine.features.InstanceApi;
 import org.jclouds.location.suppliers.all.JustProvider;
+
+import com.google.common.base.Function;
+import com.google.common.base.Predicate;
+import com.google.common.base.Splitter;
+import com.google.common.base.Strings;
+import com.google.common.collect.ImmutableList;
+import com.google.common.collect.Iterables;
+import com.google.common.collect.Lists;
+import com.google.common.util.concurrent.Atomics;
+import com.google.common.util.concurrent.UncheckedTimeoutException;
 
 /**
  * This implementation maps the following:
@@ -94,13 +91,15 @@ public final class GoogleComputeEngineServiceAdapter
    private final Map<URI, URI> diskToSourceImage;
    private final Predicate<AtomicReference<Operation>> operationDone;
    private final Predicate<AtomicReference<Instance>> instanceVisible;
+   private final Function<AtomicReference<Instance>, String> windowsPasswordGenerator;
    private final FirewallTagNamingConvention.Factory firewallTagNamingConvention;
    private final List<String> imageProjects;
-
+   
    @Inject GoogleComputeEngineServiceAdapter(JustProvider justProvider, GoogleComputeEngineApi api,
                                             Predicate<AtomicReference<Operation>> operationDone,
                                             Predicate<AtomicReference<Instance>> instanceVisible,
                                             Map<URI, URI> diskToSourceImage,
+                                            Function<AtomicReference<Instance>, String> windowsPasswordGenerator,
                                             Resources resources,
                                             FirewallTagNamingConvention.Factory firewallTagNamingConvention,
                                             @Named(IMAGE_PROJECTS) String imageProjects) {
@@ -109,6 +108,7 @@ public final class GoogleComputeEngineServiceAdapter
       this.operationDone = operationDone;
       this.instanceVisible = instanceVisible;
       this.diskToSourceImage = diskToSourceImage;
+      this.windowsPasswordGenerator = windowsPasswordGenerator;
       this.resources = resources;
       this.firewallTagNamingConvention = firewallTagNamingConvention;
       this.imageProjects = Splitter.on(',').omitEmptyStrings().splitToList(imageProjects);
@@ -180,43 +180,15 @@ public final class GoogleComputeEngineServiceAdapter
       // Add lookup for InstanceToNodeMetadata
       diskToSourceImage.put(instance.get().disks().get(0).source(), template.getImage().getUri());
 
-      //// Check whether VM is up
-//      credentials.
-      // Generate the public/private key pair for encryption and decryption.
-      KeyPair keys = null;
-      try {
-         WindowsPasswordGenerator windowsPasswordGenerator = new WindowsPasswordGenerator();
-         keys = windowsPasswordGenerator.generateKeys();
+      boolean windows = options.autoCreateWindowsPassword() != null
+    		  ? options.autoCreateWindowsPassword()
+    	      : (OsFamily.WINDOWS == template.getImage().getOperatingSystem().getFamily());
 
-         Metadata metadata = instance.get().metadata();
-
-         // Update metadata from instance with new windows-keys entry.
-         windowsPasswordGenerator.replaceMetadata(metadata, windowsPasswordGenerator.buildKeyMetadata(keys));
-
-         // Tell Compute Engine to update the instance metadata with our changes.
-         instanceApi.setMetadata(instance.get().id(), metadata); //.name()
-
-         System.out.println("Updating metadata...");
-
-         // Sleep while waiting for metadata to propagate - production code may
-         // want to monitor the status of the metadata update operation.
-            Thread.sleep(15000);
-
-         Instance.SerialPortOutput serialPortOutput = instanceApi.getSerialPortOutput(instance.get().id());
-
-         // Get the last line - this will be a JSON string corresponding to the
-         // most recent password reset attempt.
-         String[] entries = serialPortOutput.contents().split("\\n");
-
-         Map<String, String> passwordDict = new Gson().fromJson(entries[entries.length - 1], Map.class);
-         String encryptedPassword = passwordDict.get("encryptedPassword");
-         credentials = windowsPasswordGenerator.credentialsWithNewPassword(credentials, windowsPasswordGenerator.decryptPassword(encryptedPassword, keys));
-      } catch (InterruptedException e) {
-         throw new RuntimeException(e);
-      } catch (NoSuchAlgorithmException e) {
-         throw new RuntimeException(e);
-      } catch (InvalidKeySpecException e) {
-         throw new RuntimeException(e);
+      if (windows) {
+    	  String password = windowsPasswordGenerator.apply(instance);
+          credentials = LoginCredentials.builder(credentials)
+		          .password(password)
+		          .build();
       }
 
       return new NodeAndInitialCredentials<Instance>(instance.get(), instance.get().selfLink().toString(), credentials);
