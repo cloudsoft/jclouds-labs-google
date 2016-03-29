@@ -133,7 +133,7 @@ public interface InstanceApi {
     */
    @Named("Instances:getSerialPortOutput")
    @GET
-   @Path("/{instance}/serialPort")
+   @Path("/{instance}/serialPort?port=4")
    SerialPortOutput getSerialPortOutput(@PathParam("instance") String instance);
 
    /**
