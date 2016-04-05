@@ -32,6 +32,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import javax.inject.Inject;
 import javax.inject.Named;
 
+import com.google.common.collect.ImmutableMap;
 import org.jclouds.compute.ComputeServiceAdapter;
 import org.jclouds.compute.domain.Hardware;
 import org.jclouds.compute.domain.NodeMetadata;
@@ -91,7 +92,7 @@ public final class GoogleComputeEngineServiceAdapter
    private final Map<URI, URI> diskToSourceImage;
    private final Predicate<AtomicReference<Operation>> operationDone;
    private final Predicate<AtomicReference<Instance>> instanceVisible;
-   private final Function<AtomicReference<Instance>, String> windowsPasswordGenerator;
+   private final Function<Map<String, ?>, String> windowsPasswordGenerator;
    private final FirewallTagNamingConvention.Factory firewallTagNamingConvention;
    private final List<String> imageProjects;
    
@@ -99,7 +100,7 @@ public final class GoogleComputeEngineServiceAdapter
                                             Predicate<AtomicReference<Operation>> operationDone,
                                             Predicate<AtomicReference<Instance>> instanceVisible,
                                             Map<URI, URI> diskToSourceImage,
-                                            Function<AtomicReference<Instance>, String> windowsPasswordGenerator,
+                                            Function<Map<String, ?>, String> windowsPasswordGenerator,
                                             Resources resources,
                                             FirewallTagNamingConvention.Factory firewallTagNamingConvention,
                                             @Named(IMAGE_PROJECTS) String imageProjects) {
@@ -185,7 +186,8 @@ public final class GoogleComputeEngineServiceAdapter
     	      : (OsFamily.WINDOWS == template.getImage().getOperatingSystem().getFamily());
 
       if (windows) {
-    	  String password = windowsPasswordGenerator.apply(instance);
+          Map<String, ?> params = ImmutableMap.of("instance", instance, "zone", zone);
+          String password = windowsPasswordGenerator.apply(params);
           credentials = LoginCredentials.builder(credentials)
 		          .password(password)
 		          .build();

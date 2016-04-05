@@ -30,6 +30,7 @@ import java.util.concurrent.atomic.AtomicReference;
 
 import javax.crypto.Cipher;
 
+import com.google.common.collect.ImmutableMap;
 import org.jclouds.crypto.Crypto;
 import org.jclouds.encryption.bouncycastle.BouncyCastleCrypto;
 import org.jclouds.googlecomputeengine.GoogleComputeEngineApi;
@@ -74,7 +75,7 @@ public class WindowsPasswordGeneratorTest {
       replay(api, instanceApi, operation, serialPortOutput);
 
       WindowsPasswordGenerator generator = new WindowsPasswordGenerator(api, bcCrypto, operationDone);
-      String result = generator.apply(new AtomicReference<Instance>(instance));
+      String result = generator.apply(ImmutableMap.of("instance", new AtomicReference<Instance>(instance), "zone", zone));
 
       verify(api, instanceApi, operation, serialPortOutput);
       assertEquals(result, "pa55w0rd");

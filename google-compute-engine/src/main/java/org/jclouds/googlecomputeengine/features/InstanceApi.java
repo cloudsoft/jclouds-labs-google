@@ -144,8 +144,8 @@ public interface InstanceApi {
     */
    @Named("Instances:getSerialPortOutput") // FIXME What does "Named" really do?!
    @GET
-   @Path("/{instance}/serialPort?port={port}")
-   SerialPortOutput getSerialPortOutput(@PathParam("instance") String instance, int port);
+   @Path("/{instance}/serialPort")
+   SerialPortOutput getSerialPortOutput(@PathParam("instance") String instance, @QueryParam("port") int port);
 
    /**
     * Hard-resets the instance.

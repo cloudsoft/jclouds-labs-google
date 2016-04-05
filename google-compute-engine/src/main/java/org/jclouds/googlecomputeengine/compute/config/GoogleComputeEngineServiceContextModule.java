@@ -135,7 +135,7 @@ public final class GoogleComputeEngineServiceContextModule
       bind(new TypeLiteral<CacheLoader<NetworkAndAddressRange, Network>>() {
       }).to(FindNetworkOrCreate.class);
 
-      bind(new TypeLiteral<Function<AtomicReference<Instance>, String>>() {
+      bind(new TypeLiteral<Function<Map<String, ?>, String>>() {
       }).to(WindowsPasswordGenerator.class);
 
       bind(FirewallTagNamingConvention.Factory.class).in(Scopes.SINGLETON);
