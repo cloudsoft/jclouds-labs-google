@@ -49,6 +49,10 @@ import com.google.common.base.Predicates;
 public class WindowsPasswordGeneratorTest {
    public void testGeneratePassword() throws Exception {
       Crypto bcCrypto = new BouncyCastleCrypto();
+//      Security.addProvider(new org.bouncycastle.jce.provider.BouncyCastleProvider());
+
+      String password = "pa55w0rd";
+
       KeyPair keyPair = bcCrypto.rsaKeyPairGenerator().genKeyPair();
       Cipher cipher = bcCrypto.cipher("RSA/NONE/OAEPPadding");
       Predicate<AtomicReference<Operation>> operationDone = Predicates.alwaysTrue();
@@ -66,16 +70,17 @@ public class WindowsPasswordGeneratorTest {
       expect(crypto.rsaKeyPairGenerator()).andReturn(keyPairGenerator);
       expect(keyPairGenerator.genKeyPair()).andReturn(keyPair);
       // FIXME assert that metadata contained what we expected
-      expect(instanceApi.setMetadata(eq(instance.id()), isA(Metadata.class))).andReturn(operation).atLeastOnce();
+      expect(instanceApi.setMetadata(eq(instance.name()), isA(Metadata.class))).andReturn(operation).atLeastOnce();
       expect(operation.httpErrorStatusCode()).andReturn(null);
-      expect(instanceApi.getSerialPortOutput(instance.id(), 4)).andReturn(serialPortOutput).atLeastOnce();
-      expect(serialPortOutput.contents()).andReturn("abcdefg");
+      expect(instanceApi.getSerialPortOutput(instance.name(), 4)).andReturn(serialPortOutput).atLeastOnce();
+      expect(serialPortOutput.contents()).andReturn("{\"ready\":true,\"version\":\"Microsoft Windows NT 6.2.9200.0\"}\n" +
+              "{\"encryptedPassword\":\""+ "encrypted and base64encoded password with keyPair.getPublic()"+ "\",\"exponent\":\"AQAB\",\"passwordFound\":true,\"userName\":\"Administrator\"}");
       expect(crypto.cipher("RSA/NONE/OAEPPadding")).andReturn(cipher);
       
       replay(api, instanceApi, operation, serialPortOutput);
 
       WindowsPasswordGenerator generator = new WindowsPasswordGenerator(api, bcCrypto, operationDone);
-      String result = generator.apply(ImmutableMap.of("instance", new AtomicReference<Instance>(instance), "zone", zone));
+      String result = generator.apply(ImmutableMap.of("instance", new AtomicReference<Instance>(instance), "zone", zone,  "email", "test@google.com", "userName", "test"));
 
       verify(api, instanceApi, operation, serialPortOutput);
       assertEquals(result, "pa55w0rd");

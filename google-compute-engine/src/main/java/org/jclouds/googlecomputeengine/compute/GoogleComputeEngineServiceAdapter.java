@@ -186,7 +186,7 @@ public final class GoogleComputeEngineServiceAdapter
     	      : (OsFamily.WINDOWS == template.getImage().getOperatingSystem().getFamily());
 
       if (windows) {
-          Map<String, ?> params = ImmutableMap.of("instance", instance, "zone", zone);
+          Map<String, ?> params = ImmutableMap.of("instance", instance, "zone", zone, "email", create.user(), "userName", credentials.getUser());
           String password = windowsPasswordGenerator.apply(params);
           credentials = LoginCredentials.builder(credentials)
 		          .password(password)
