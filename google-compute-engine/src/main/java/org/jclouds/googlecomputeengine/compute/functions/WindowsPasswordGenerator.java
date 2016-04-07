@@ -31,6 +31,8 @@ import java.util.Arrays;
 import java.util.Date;
 import java.util.Map;
 import java.util.TimeZone;
+import java.util.concurrent.Callable;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 
 import javax.annotation.Resource;
@@ -41,6 +43,9 @@ import javax.crypto.NoSuchPaddingException;
 import javax.inject.Inject;
 import javax.inject.Named;
 
+import com.google.common.util.concurrent.SimpleTimeLimiter;
+import com.google.common.util.concurrent.TimeLimiter;
+import com.google.gson.GsonBuilder;
 import org.jclouds.compute.reference.ComputeServiceConstants;
 import org.jclouds.crypto.Crypto;
 import org.jclouds.googlecomputeengine.GoogleComputeEngineApi;
@@ -53,21 +58,17 @@ import org.jclouds.logging.Logger;
 
 import com.google.common.base.Function;
 import com.google.common.base.Predicate;
-import com.google.common.base.Splitter;
 import com.google.common.base.Throwables;
 import com.google.common.collect.ImmutableMap;
-import com.google.common.collect.Iterables;
 import com.google.common.io.BaseEncoding;
 import com.google.common.util.concurrent.Atomics;
 import com.google.gson.Gson;
-import com.google.gson.reflect.TypeToken;
-import com.google.inject.TypeLiteral;
 
 /**
  * References:
  * <ul>
- *   <li>{@linkplain https://cloud.google.com/compute/docs/instances/automate-pw-generation}
- *   <li>{@linkplain https://github.com/GoogleCloudPlatform/compute-image-windows/blob/master/examples/windows_auth_java_sample.java}
+ *   <li><a href="https://cloud.google.com/compute/docs/instances/automate-pw-generation">automate-pw-generation</a>
+ *   <li><a href="https://github.com/GoogleCloudPlatform/compute-image-windows/blob/master/examples/windows_auth_java_sample.java">windows_auth_java_sample.java</a>
  * </ul>
  * 
  * In brief, the sequence is:
@@ -78,16 +79,18 @@ import com.google.inject.TypeLiteral;
  *   <li>Decode and decrypt the result.
  * </ol>
  */
-public class WindowsPasswordGenerator implements Function<AtomicReference<Instance>, String> {
+public class WindowsPasswordGenerator implements Function<Map<String, ?>, String> {
 
    /**
     * Indicates when the key should expire. Keys are one-time use, so the metadata doesn't need to stay around for long.
-    * 5 minutes chosen to allow for differences between time on the client
+    * 10 minutes chosen to allow for differences between time on the client
     * and time on the server.
     */
-   private static final long EXPIRE_DURATION = 30 * 60 * 1000;
+   private static final long EXPIRE_DURATION = 10 * 60 * 1000;
+   private String userName;
+   private String email;
 
-   @Resource
+    @Resource
    @Named(ComputeServiceConstants.COMPUTE_LOGGER)
    protected Logger logger = Logger.NULL;
 
@@ -103,11 +106,11 @@ public class WindowsPasswordGenerator implements Function<AtomicReference<Instan
    }
 
    @Override
-   public String apply(AtomicReference<Instance> instance) {
-      // FIXME get zone how?
-      String zone;
-      //zoneUri = instance.get().zone();
-      zone = "us-central1-a";
+   public String apply(Map<String, ?> params) {
+      String zone = (String)params.get("zone");
+       final AtomicReference<Instance> instance = (AtomicReference<Instance>)params.get("instance");
+       userName = (String)params.get("userName");
+       email = (String)params.get("email");
 
       // TODO Check whether VM is up
       try {
@@ -117,12 +120,13 @@ public class WindowsPasswordGenerator implements Function<AtomicReference<Instan
 
          // Update instance's metadata with new "windows-keys" entry, and wait for operation to 
          // complete.
-         logger.debug("Generating windows key for instance %s, by updating metadata", instance.get().id());
-         InstanceApi instanceApi = api.instancesInZone(zone);
+         logger.debug("Generating windows key for instance %s, by updating metadata", instance.get().name());
+         final InstanceApi instanceApi = api.instancesInZone(zone);
          Metadata metadata = instance.get().metadata();
-         metadata.put("windows-keys", new Gson().toJson(extractKeyMetadata(keys)));
+         // If disableHtmlEscaping is not there, == will be escaped from modulus value
+          metadata.put("windows-keys", new GsonBuilder().disableHtmlEscaping().create().toJson(extractKeyMetadata(keys)));
 
-         AtomicReference<Operation> operation = Atomics.newReference(instanceApi.setMetadata(instance.get().id(), metadata));
+         AtomicReference<Operation> operation = Atomics.newReference(instanceApi.setMetadata(instance.get().name(), metadata));
          operationDone.apply(operation);
 
          if (operation.get().httpErrorStatusCode() != null) {
@@ -131,19 +135,43 @@ public class WindowsPasswordGenerator implements Function<AtomicReference<Instan
                   operation.get().httpErrorMessage());
          }
 
-         // Retrieve the result from the last line of serialPortOutput; expect JSON string
-         // FIXME should it be "\\n", as Valentin did?
-         Instance.SerialPortOutput serialPortOutput = instanceApi.getSerialPortOutput(instance.get().id(), 4);
-         String entry = Iterables.getLast(Splitter.on("\n").split(serialPortOutput.contents()));
+         TimeLimiter limiter = new SimpleTimeLimiter();
+         String encryptedPassword = null;
+         try {
+            encryptedPassword = limiter.callWithTimeout(new Callable<String>() {
+               public String call() {
+                  String serialPortContents = "";
+                  Map<String, String> passwordDict = ImmutableMap.of();
+                  while (!serialPortContents.startsWith("{\"ready\":true") || passwordDict.get("encryptedPassword") == null) {
+                     try {
+                        Thread.sleep(30 * 1000);
+                     } catch (InterruptedException e) {
+                        Throwables.propagate(e);
+                     }
+                     serialPortContents = instanceApi.getSerialPortOutput(instance.get().name(), 4).contents();
+                     String[] contentEntries = serialPortContents.split("\n");
+                     passwordDict = new Gson().fromJson(contentEntries[contentEntries.length - 1], Map.class);
+                  }
+                  return passwordDict.get("encryptedPassword");
+               }
+            }, 5, TimeUnit.MINUTES, false); // Notice that timeoutDuration should be less than EXPIRE_DURATION
+         } catch (Exception e) {
+            throw Throwables.propagate(e);
+         }
 
-         // Decrypt and return the password
-         // FIXME Use TypeToken
-         Map<String, String> passwordDict = new Gson().fromJson(entry, Map.class);
-         return checkNotNull(passwordDict.get("encryptedPassword"), "password");
+         return decryptPassword(checkNotNull(encryptedPassword, "encryptedPassword shouldn't be null"), keys);
 
       } catch (NoSuchAlgorithmException e) {
          throw Throwables.propagate(e);
       } catch (InvalidKeySpecException e) {
+         throw Throwables.propagate(e);
+      } catch (NoSuchPaddingException e) {
+         throw Throwables.propagate(e);
+      } catch (InvalidKeyException e) {
+         throw Throwables.propagate(e);
+      } catch (IllegalBlockSizeException e) {
+         throw Throwables.propagate(e);
+      } catch ( BadPaddingException e) {
          throw Throwables.propagate(e);
       }
    }
@@ -151,14 +179,14 @@ public class WindowsPasswordGenerator implements Function<AtomicReference<Instan
    /**
     * Decrypts the given password - the encrypted text is base64-encoded.
     * As per the GCE docs, assumes it was encrypted with algorithm "RSA/NONE/OAEPPadding", and UTF-8.
- * @throws NoSuchPaddingException 
- * @throws NoSuchAlgorithmException 
- * @throws InvalidKeyException 
- * @throws BadPaddingException 
- * @throws IllegalBlockSizeException 
+    * @throws NoSuchPaddingException
+    * @throws NoSuchAlgorithmException
+    * @throws InvalidKeyException
+    * @throws BadPaddingException
+    * @throws IllegalBlockSizeException
     */
-   protected String decryptPassword(String message, KeyPair keys) throws NoSuchAlgorithmException, 
-   			NoSuchPaddingException, InvalidKeyException, IllegalBlockSizeException, BadPaddingException {
+   protected String decryptPassword(String message, KeyPair keys) throws NoSuchAlgorithmException,
+           NoSuchPaddingException, InvalidKeyException, IllegalBlockSizeException, BadPaddingException {
       // FIXME how to ensure crypto supports OAEPPadding?
       // FIXME Valentin's code was also passing provider "BC"
       // Assumes user has configured appropriate crypto guice module.
@@ -177,9 +205,9 @@ public class WindowsPasswordGenerator implements Function<AtomicReference<Instan
 
    /**
     * Generates the metadata value for this keypair.
-    * Extracts the public key's the RSA spec's modulus and exponent, encoded as Base-64, and 
+    * Extracts the public key's the RSA spec's modulus and exponent, encoded as Base-64, and
     * an expires date.
-    * 
+    *
     * @param pair
     * @return
     * @throws NoSuchAlgorithmException
@@ -203,9 +231,11 @@ public class WindowsPasswordGenerator implements Function<AtomicReference<Instan
       String expireString = rfc3339Format.format(expireDate);
 
       return ImmutableMap.<String, String>builder()
-            .put("modulus", modulusString)
-            .put("exponent", exponentString)
-            .put("expireOn", expireString)
-            .build();
+              .put("modulus", modulusString)
+              .put("exponent", exponentString)
+              .put("expireOn", expireString)
+              .put("userName", userName)
+              .put("email", email) // email of the user should be here. Now it is the username.
+              .build();
    }
 }
