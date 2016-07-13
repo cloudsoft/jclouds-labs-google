@@ -21,13 +21,13 @@
          xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/maven-v4_0_0.xsd">
     <modelVersion>4.0.0</modelVersion>
     <parent>
-        <groupId>org.apache.jclouds.labs</groupId>
+        <groupId>io.cloudsoft.jclouds.labs</groupId>
         <artifactId>jclouds-labs-google</artifactId>
-        <version>1.9.3-SNAPSHOT</version>
+        <version>1.9.2-alpha.20160713</version>
     </parent>
 
     <!-- TODO: when out of labs, switch to org.jclouds.provider -->
-    <groupId>org.apache.jclouds.labs</groupId>
+    <groupId>io.cloudsoft.jclouds.labs</groupId>
     <artifactId>google-compute-engine</artifactId>
     <name>jclouds Google Compute Engine provider</name>
     <description>jclouds components to access GoogleCompute</description>
@@ -45,25 +45,25 @@
 
     <dependencies>
         <dependency>
-            <groupId>org.apache.jclouds</groupId>
+            <groupId>io.cloudsoft.jclouds</groupId>
             <artifactId>jclouds-core</artifactId>
             <version>${jclouds.version}</version>
         </dependency>
         <dependency>
-            <groupId>org.apache.jclouds.labs</groupId>
+            <groupId>io.cloudsoft.jclouds.labs</groupId>
             <artifactId>googlecloud</artifactId>
             <version>${project.version}</version>
             <type>jar</type>
         </dependency>
         <dependency>
-            <groupId>org.apache.jclouds.labs</groupId>
+            <groupId>io.cloudsoft.jclouds.labs</groupId>
             <artifactId>googlecloud</artifactId>
             <version>${project.version}</version>
             <type>test-jar</type>
             <scope>test</scope>
         </dependency>
         <dependency>
-            <groupId>org.apache.jclouds</groupId>
+            <groupId>io.cloudsoft.jclouds</groupId>
             <artifactId>jclouds-compute</artifactId>
             <version>${jclouds.version}</version>
         </dependency>
@@ -78,33 +78,33 @@
             <scope>provided</scope>
         </dependency>
         <dependency>
-            <groupId>org.apache.jclouds</groupId>
+            <groupId>io.cloudsoft.jclouds</groupId>
             <artifactId>jclouds-compute</artifactId>
             <version>${jclouds.version}</version>
             <type>test-jar</type>
             <scope>test</scope>
         </dependency>
         <dependency>
-            <groupId>org.apache.jclouds</groupId>
+            <groupId>io.cloudsoft.jclouds</groupId>
             <artifactId>jclouds-core</artifactId>
             <version>${jclouds.version}</version>
             <type>test-jar</type>
             <scope>test</scope>
         </dependency>
         <dependency>
-            <groupId>org.apache.jclouds.driver</groupId>
+            <groupId>io.cloudsoft.jclouds.driver</groupId>
             <artifactId>jclouds-slf4j</artifactId>
             <version>${jclouds.version}</version>
             <scope>test</scope>
         </dependency>
         <dependency>
-            <groupId>org.apache.jclouds.driver</groupId>
+            <groupId>io.cloudsoft.jclouds.driver</groupId>
             <artifactId>jclouds-sshj</artifactId>
             <version>${jclouds.version}</version>
             <scope>test</scope>
         </dependency>
         <dependency>
-            <groupId>org.apache.jclouds.driver</groupId>
+            <groupId>io.cloudsoft.jclouds.driver</groupId>
             <artifactId>jclouds-okhttp</artifactId>
             <version>${project.version}</version>
             <scope>test</scope>
@@ -115,7 +115,7 @@
             <scope>test</scope>
         </dependency>
         <dependency>
-            <groupId>org.apache.jclouds.driver</groupId>
+            <groupId>io.cloudsoft.jclouds.driver</groupId>
             <artifactId>jclouds-bouncycastle</artifactId>
             <version>${jclouds.version}</version>
             <scope>test</scope>
