@@ -23,7 +23,7 @@
     <parent>
         <groupId>io.cloudsoft.jclouds.labs</groupId>
         <artifactId>jclouds-labs-google</artifactId>
-        <version>1.9.3-cloudsoft.20160725</version>
+        <version>1.9.3-cloudsoft.20160825</version>
     </parent>
 
     <!-- TODO: when out of labs, switch to org.jclouds.provider -->
@@ -31,7 +31,7 @@
     <artifactId>google-compute-engine</artifactId>
     <name>jclouds Google Compute Engine provider</name>
     <description>jclouds components to access GoogleCompute</description>
-    <version>1.9.2-cloudsoft.20160428.1318</version>
+    <packaging>bundle</packaging>
 
     <properties>
         <test.google-compute-engine.identity>client_email which usually looks like project_id@developer.gserviceaccount.com</test.google-compute-engine.identity>
@@ -42,6 +42,8 @@
         <test.google-compute-engine.api-version>v1</test.google-compute-engine.api-version>
         <test.google-compute-engine.build-version/>
         <test.google-compute-engine.template>imageNameMatches=debian-7-wheezy-v[0-9]*,locationId=us-central1-a,minRam=2048</test.google-compute-engine.template>
+        <jclouds.osgi.export>org.jclouds.google-compute-engine*;version="${project.version}"</jclouds.osgi.export>
+        <jclouds.osgi.import>org.jclouds*,*</jclouds.osgi.import>
     </properties>
 
     <scm>
@@ -142,74 +144,6 @@
         </dependency>
     </dependencies>
 
-  <build>
-    <plugins>
-      <plugin>
-        <artifactId>maven-checkstyle-plugin</artifactId>
-        <version>2.13</version>
-        <executions>
-          <execution>
-            <phase>verify</phase>
-            <goals>
-              <goal>check</goal>
-            </goals>
-            <configuration>
-              <configLocation>resources/checkstyle.xml</configLocation>
-              <includeTestSourceDirectory>true</includeTestSourceDirectory>
-              <failOnViolation>true</failOnViolation>
-              <failsOnError>true</failsOnError>
-              <violationSeverity>warning</violationSeverity>
-            </configuration>
-          </execution>
-        </executions>
-        <dependencies>
-          <dependency>
-            <groupId>org.apache.jclouds</groupId>
-            <artifactId>jclouds-resources</artifactId>
-            <version>1.9.2</version>
-            <scope>compile</scope>
-          </dependency>
-        </dependencies>
-        <configuration>
-          <configLocation>resources/checkstyle.xml</configLocation>
-          <includeTestSourceDirectory>true</includeTestSourceDirectory>
-          <failOnViolation>true</failOnViolation>
-          <failsOnError>true</failsOnError>
-          <violationSeverity>warning</violationSeverity>
-        </configuration>
-      </plugin>
-      <plugin>
-        <groupId>org.gaul</groupId>
-        <artifactId>modernizer-maven-plugin</artifactId>
-        <version>1.3.0</version>
-        <executions>
-          <execution>
-            <id>modernizer</id>
-            <phase>verify</phase>
-            <goals>
-              <goal>modernizer</goal>
-            </goals>
-            <configuration>
-              <javaVersion>1.6</javaVersion>
-              <exclusionsFile>resources/modernizer_exclusions.txt</exclusionsFile>
-            </configuration>
-          </execution>
-        </executions>
-        <dependencies>
-          <dependency>
-            <groupId>org.apache.jclouds</groupId>
-            <artifactId>jclouds-resources</artifactId>
-            <version>1.9.2</version>
-            <scope>compile</scope>
-          </dependency>
-        </dependencies>
-        <configuration>
-          <javaVersion>1.6</javaVersion>
-          <exclusionsFile>resources/modernizer_exclusions.txt</exclusionsFile>
-        </configuration>
-      </plugin>
-    </plugins>
-  </build>
 
     <profiles>
         <profile>

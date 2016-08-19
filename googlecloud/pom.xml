@@ -23,7 +23,7 @@
     <parent>
         <groupId>io.cloudsoft.jclouds.labs</groupId>
         <artifactId>jclouds-labs-google</artifactId>
-        <version>1.9.3-cloudsoft.20160725</version>
+        <version>1.9.3-cloudsoft.20160825</version>
     </parent>
 
     <!-- TODO: when out of labs, switch to org.jclouds.provider -->
@@ -31,6 +31,12 @@
     <artifactId>googlecloud</artifactId>
     <name>jclouds Google Cloud Core</name>
     <description>jclouds components common to Google Cloud products</description>
+    <packaging>bundle</packaging>
+
+    <properties>
+        <jclouds.osgi.export>org.jclouds.googlecloud*;version="${project.version}"</jclouds.osgi.export>
+        <jclouds.osgi.import>org.jclouds*,*</jclouds.osgi.import>
+    </properties>
 
     <dependencies>
         <dependency>

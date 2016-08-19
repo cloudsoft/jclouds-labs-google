@@ -23,7 +23,7 @@
     <parent>
         <groupId>io.cloudsoft.jclouds.labs</groupId>
         <artifactId>jclouds-labs-google</artifactId>
-        <version>1.9.3-cloudsoft.20160725</version>
+        <version>1.9.3-cloudsoft.20160825</version>
     </parent>
 
     <!-- TODO: when out of labs, switch to org.jclouds.provider -->
@@ -42,7 +42,7 @@
         <test.google-cloud-storage.api-version>v1</test.google-cloud-storage.api-version>
         <test.google-cloud-storage.build-version/>
         <jclouds.osgi.export>org.jclouds.googlecloudstorage*;version="${project.version}"</jclouds.osgi.export>
-        <jclouds.osgi.import>org.jclouds*;version="${project.version}",*</jclouds.osgi.import>
+        <jclouds.osgi.import>org.jclouds*,*</jclouds.osgi.import>
     </properties>
 
     <dependencies>
